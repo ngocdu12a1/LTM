@@ -6,8 +6,21 @@
 
 
 #define server_addr "127.0.0.1"
-
+#define welcome "220 welcome to ftp server on windown.\r\n"
 using namespace std;
+
+DWORD WINAPI ClientThread(LPVOID arg);
+
+struct ftpClient {
+	char cmd[256], curdic[256];
+	SOCKET data_sk, ctrl_sk;
+	int login, permission;
+
+	ftpClient(SOCKET c) {
+		ctrl_sk = c;
+		login = permission = -1;
+	}
+};
 
 SOCKET datasocket, sendata;
 
@@ -37,7 +50,7 @@ void resCwd(SOCKET c) {
 }
 
 void resSYST(SOCKET c) {
-	char response[1024] = "215 Windown 10.\r\n";
+	char response[1024] = "215  Windows_NT.\r\n";
 	send(c, response, sizeof(response), 0);
 }
 
@@ -46,8 +59,6 @@ void resPasv(SOCKET c) {
 	char response[1024] = "227 Entering Passive Mode (127,0,0,1,198,47).\r\n";
 	send(c, response, sizeof(response), 0);
 
-	WSADATA DATA;
-	WSAStartup(MAKEWORD(2, 2), &DATA);
 
 	datasocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	/**
@@ -78,15 +89,17 @@ void resList(SOCKET c) {
 	char response[1024] = "150 Here comes the directory listing.\r\n";
 	send(c, response, sizeof(response), 0);
 
-	char dir[1024] = "MSOffice\r\n";
+	char dir[1024] = "drwxrwx---+ 1 Administrators              SYSTEM                               0 Nov 23 21:53 '$AV_AVG'\r\n";
 
 	SOCKADDR_IN caddr;
 	int client = sizeof(caddr);
 	
 
+//	send(datasocket, dir, sizeof(dir), 0);
 	send(sendata, dir, sizeof(dir), 0);
 
-	cout << WSAGetLastError() << endl;
+//	closesocket(datasocket);
+	closesocket(sendata);
 
 	char response1[1024] = "226 Directory send OK.\r\n";
 	send(c, response1, sizeof(response1), 0);
@@ -123,6 +136,11 @@ void handle_client(SOCKET c, char cmd[1024]) {
 	else if (strcmp(cmd, "FEAT") == 0) resFeat(c);
 	else if (strcmp(cmd, "TYPE") == 0) resType(c);
 }
+
+void Handle_client(ftpClient clen) {
+
+}
+
 int main()
 {
 	WSADATA DATA;
@@ -135,28 +153,33 @@ int main()
 	saddr.sin_addr.s_addr = inet_addr(server_addr);
 
 	bind(s, (sockaddr*)&saddr, sizeof(saddr));
-
 	listen(s, 10);
 
-	char buffer[1024];
-	char welcome[1024] = "220 welcome to ftp server.\r\n";
-
-	SOCKADDR_IN caddr;
-	int client = sizeof(caddr);
-
-
-
-	SOCKET c = accept(s, (sockaddr*)&caddr, &client);
-
-	send(c, welcome, sizeof(welcome), 0);
 	while (0 == 0) {
-		char verb[1024];
-		memset(verb, 0, 1024);
-		memset(buffer, 0, 1024);
-		recv(c, buffer, 1023, 0);
-		
-		sscanf(buffer, "%s", verb);
-		handle_client(c, verb);
+		SOCKADDR_IN caddr;
+		int clen = sizeof(caddr);
+		SOCKET c = accept(s, (sockaddr*)&caddr, &clen);
+		DWORD ID = 0;
+		CreateThread(NULL, 0, ClientThread, (LPVOID)c, 0, &ID);
 	}
 }
 
+DWORD WINAPI ClientThread(LPVOID arg) {
+	SOCKET c = (SOCKET)arg;
+	ftpClient client = ftpClient(c);
+	send(client.ctrl_sk, welcome, strlen(welcome), 0);
+
+	char buffer[1024], verb[1024];
+
+	while (0 == 0) {
+		memset(buffer, 0, 1024);
+		recv(client.ctrl_sk, buffer, 1023, 0);
+		sscanf(buffer, "%s", verb);
+		if (strcmp(verb, "QUIT") == 0) {
+
+		}
+		else {
+			Handle_client(client);
+		}
+	}
+}
