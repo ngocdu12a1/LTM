@@ -12,7 +12,7 @@ using namespace std;
 DWORD WINAPI ClientThread(LPVOID arg);
 
 struct ftpClient {
-	char cmd[256], curdic[256];
+	char verb[1024], curdic[1024];
 	SOCKET data_sk, ctrl_sk;
 	int login, permission;
 
@@ -24,92 +24,77 @@ struct ftpClient {
 
 SOCKET datasocket, sendata;
 
-void resUser(SOCKET c) {
-	char response[1024] = "331 Please spcify the password.\r\n";
-	send(c, response, sizeof(response), 0);
+void sendResponse(ftpClient client, char* res) {
+	send(client.ctrl_sk, res, strlen(res), 0);
 }
 
-void resPass(SOCKET c) {
-	char response[1024] = "230 Login succesfull.\r\n";
-	send(c, response, sizeof(response), 0);
+void sendDir(ftpClient client, char* dir) {
+	send(client.data_sk, dir, strlen(dir), 0);
+}
+void resUser(ftpClient client) {
+	sendResponse(client, "331 Please spcify the password.\r\n");
 }
 
-void resOPTS(SOCKET c) {
-	char response[1024] = "200 Always in UTF8 mode.\r\n";
-	send(c, response, sizeof(response), 0);
+void resPass(ftpClient client) {
+	sendResponse(client, "230 Login succesfull.\r\n");
+
 }
 
-void resPwd(SOCKET c) {
-	char response[1024] = "257 \"\/\" \r\n";
-	send(c, response, sizeof(response), 0);
+void resOPTS(ftpClient client) {
+	sendResponse(client, "200 Always in UTF8 mode.\r\n");
 }
 
-void resCwd(SOCKET c) {
-	char response[1024] = "250 Directory succesfully changed.\r\n";
-	send(c, response, sizeof(response), 0);
+void resPwd(ftpClient client) {
+	sendResponse(client, "257 \"\D:/\" \r\n");
 }
 
-void resSYST(SOCKET c) {
-	char response[1024] = "215  Windows_NT.\r\n";
-	send(c, response, sizeof(response), 0);
+void resCwd(ftpClient client) {
+	sendResponse(client, "250 Directory succesfully changed.\r\n");
 }
 
-void resPasv(SOCKET c) {
+void resSYST(ftpClient client) {
+	sendResponse(client, "215  Windows_NT.\r\n");
+}
 
-	char response[1024] = "227 Entering Passive Mode (127,0,0,1,198,47).\r\n";
-	send(c, response, sizeof(response), 0);
+void resPasv(ftpClient& client) {
 
+	sendResponse(client, "227 Entering Passive Mode (127,0,0,1,198,47).\r\n");
 
 	datasocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	/**
-		Reuse host
+	Reuse host
 	*/
-	
+
 	SOCKADDR_IN saddr;
 	saddr.sin_family = AF_INET;
 	saddr.sin_port = htons(50735);
 	saddr.sin_addr.s_addr = inet_addr(server_addr);
-
 	bind(datasocket, (sockaddr*)&saddr, sizeof(saddr));
-
 	int res = 0;
-	
 	listen(datasocket, 10);
-
-
 	SOCKADDR_IN caddr;
-	int client = sizeof(caddr);
-
-	sendata = accept(datasocket, (sockaddr*)&caddr, &client);
-
+	int clen = sizeof(caddr);
+	client.data_sk = accept(datasocket, (sockaddr*)&caddr, &clen);
 	cout << "connect data succesfully" << endl;
 }
 
-void resList(SOCKET c) {
-	char response[1024] = "150 Here comes the directory listing.\r\n";
-	send(c, response, sizeof(response), 0);
+void resList(ftpClient client) {
 
-	char dir[1024] = "drwxrwx---+ 1 Administrators              SYSTEM                               0 Nov 23 21:53 '$AV_AVG'\r\n";
+	sendResponse(client, "150 Here comes the directory listing.\r\n");
 
-	SOCKADDR_IN caddr;
-	int client = sizeof(caddr);
+	char dir[1024] = "drw-r--r--    1 501      501        688017 Jan 24 13:04 Chuong0\r\n";
 	
-
-//	send(datasocket, dir, sizeof(dir), 0);
-	send(sendata, dir, sizeof(dir), 0);
-
+	sendDir(client, dir);
 //	closesocket(datasocket);
-	closesocket(sendata);
+	closesocket(client.data_sk);
 
-	char response1[1024] = "226 Directory send OK.\r\n";
-	send(c, response1, sizeof(response1), 0);
+	sendResponse(client, "226 Directory send OK.\r\n");
 }
 
-void resType(SOCKET c) {
-	char response[1024] = "200 Switching to Binary mode.\r\n";
-	send(c, response, sizeof(response), 0);
+void resType(ftpClient client) {
+	sendResponse(client, "200 Switching to Binary mode.\r\n");
 }
-void resFeat(SOCKET c) {
+void resFeat(ftpClient clen) {
 	char start[1024] = "211-Features:\r\n";
 	char f1[1024] = "EPRT\r\n"; char f2[1024] = "EPSV\r\n";
 	char f3[1024] = "MDTM\r\n"; char f4[1024] = "REST STREAM\r\n";
@@ -117,28 +102,26 @@ void resFeat(SOCKET c) {
 	char f7[1024] = "UTF8\r\n"; 
 	char end[1024] = "211 End.\r\n";
 
-	send(c, start, sizeof(start), 0);
-	send(c, f1, sizeof(f1), 0);  send(c, f2, sizeof(f2), 0);
-	send(c, f3, sizeof(f3), 0);  send(c, f4, sizeof(f4), 0);
-	send(c, f5, sizeof(f5), 0);  send(c, f6, sizeof(f6), 0);
-	send(c, f7, sizeof(f7), 0); 
-	send(c, end, sizeof(end), 0);
-}
-void handle_client(SOCKET c, char cmd[1024]) {
-	if (strcmp(cmd, "USER") == 0) resUser(c);
-	else if (strcmp(cmd, "PASS") == 0) resPass(c);
-    else if (strcmp(cmd, "OPTS") == 0) resOPTS(c);
-	else if (strcmp(cmd, "PWD") == 0) resPwd(c);
-	else if (strcmp(cmd, "CWD") == 0) resCwd(c);
-	else if (strcmp(cmd, "SYST") == 0) resSYST(c);
-	else if (strcmp(cmd, "PASV") == 0) resPasv(c);
-	else if (strcmp(cmd, "LIST") == 0) resList(c);
-	else if (strcmp(cmd, "FEAT") == 0) resFeat(c);
-	else if (strcmp(cmd, "TYPE") == 0) resType(c);
+	send(clen.ctrl_sk, start, sizeof(start), 0);
+	send(clen.ctrl_sk, f1, sizeof(f1), 0);  send(clen.ctrl_sk, f2, sizeof(f2), 0);
+	send(clen.ctrl_sk, f3, sizeof(f3), 0);  send(clen.ctrl_sk, f4, sizeof(f4), 0);
+	send(clen.ctrl_sk, f5, sizeof(f5), 0);  send(clen.ctrl_sk, f6, sizeof(f6), 0);
+	send(clen.ctrl_sk, f7, sizeof(f7), 0); 
+	send(clen.ctrl_sk, end, sizeof(end), 0);
 }
 
-void Handle_client(ftpClient clen) {
 
+void Handle_client(ftpClient& clen) {
+	if (strcmp(clen.verb, "USER") == 0) resUser(clen);
+	else if (strcmp(clen.verb, "PASS") == 0) resPass(clen);
+	else if (strcmp(clen.verb, "OPTS") == 0) resOPTS(clen);
+	else if (strcmp(clen.verb, "PWD") == 0) resPwd(clen);
+	else if (strcmp(clen.verb, "CWD") == 0) resCwd(clen);
+	else if (strcmp(clen.verb, "SYST") == 0) resSYST(clen);
+	else if (strcmp(clen.verb, "PASV") == 0) resPasv(clen);
+	else if (strcmp(clen.verb, "LIST") == 0) resList(clen);
+	else if (strcmp(clen.verb, "TYPE") == 0) resType(clen);
+	else if (strcmp(clen.verb, "FEAT") == 0) resType(clen);
 }
 
 int main()
@@ -173,8 +156,11 @@ DWORD WINAPI ClientThread(LPVOID arg) {
 
 	while (0 == 0) {
 		memset(buffer, 0, 1024);
+		memset(client.verb, 0, 1024);
+
 		recv(client.ctrl_sk, buffer, 1023, 0);
-		sscanf(buffer, "%s", verb);
+		sscanf(buffer, "%s", client.verb);
+
 		if (strcmp(verb, "QUIT") == 0) {
 
 		}
