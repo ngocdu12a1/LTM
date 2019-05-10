@@ -3,8 +3,8 @@
 #include <Windows.h>
 #include <string.h>
 #include <iostream>
-
-
+#include <cstdlib>
+#include <ctime>
 #define server_addr "127.0.0.1"
 #define welcome "220 welcome to ftp server on windown.\r\n"
 using namespace std;
@@ -12,13 +12,15 @@ using namespace std;
 DWORD WINAPI ClientThread(LPVOID arg);
 
 struct ftpClient {
-	char verb[1024], curdic[1024];
+	char verb[1024], curdic[1024], arg[1024], name[1024], pass[1024];
 	SOCKET data_sk, ctrl_sk;
 	int login, permission;
 
 	ftpClient(SOCKET c) {
 		ctrl_sk = c;
 		login = permission = -1;
+		memset(curdic, 0, 1024);
+		strcpy(curdic, "/");
 	}
 };
 
@@ -31,11 +33,43 @@ void sendResponse(ftpClient client, char* res) {
 void sendDir(ftpClient client, char* dir) {
 	send(client.data_sk, dir, strlen(dir), 0);
 }
-void resUser(ftpClient client) {
+void resUser(ftpClient& client) {
+	memset(client.name, 0, 1024);
+	strcpy(client.name, client.arg);
 	sendResponse(client, "331 Please spcify the password.\r\n");
 }
 
-void resPass(ftpClient client) {
+void resPass(ftpClient& client) {
+
+	memset(client.pass, 0, 1024);
+	strcpy(client.pass, client.arg);
+
+	if (strcmp(client.name, "anonymous") == 0) {
+		// dang nhap an danh
+		client.login = 1;
+	}
+	else {
+		FILE* f = fopen("C:/Temp/login.txt", "rt");
+		char line[1024], user[1024], pass[1024];
+		bool isValid = false;
+		while (!feof(f)) {
+			memset(line, 0, 1024); memset(user, 0, 1024); memset(pass, 0, 1024);
+			fgets(line, 1023, f);
+			sscanf(line, "%s%s", user, pass);
+			if (strcmp(user, client.name) == 0 && strcmp(pass, client.pass) == 0) {
+				// dang nhap voi tu cach la user
+				client.login = 2;
+				isValid = true;
+				break;
+			}
+
+		}
+		if (!isValid) {
+			sendResponse(client, "530 name or password incorrect.\r\n");
+			client.login = 0;
+			closesocket(client.ctrl_sk);
+		}
+	}
 	sendResponse(client, "230 Login succesfull.\r\n");
 
 }
@@ -45,32 +79,38 @@ void resOPTS(ftpClient client) {
 }
 
 void resPwd(ftpClient client) {
-	sendResponse(client, "257 \"\D:/\" \r\n");
+	char dir[1024];
+	memset(dir, 0, 1024);
+	sprintf(dir, "%d \"%s\"\r\n", 257, client.curdic);
+	sendResponse(client, dir);
 }
 
-void resCwd(ftpClient client) {
+void resCwd(ftpClient& client) {
+	
+	memset(client.curdic, 0, sizeof(client.curdic));
+	strcpy(client.curdic, client.arg);
 	sendResponse(client, "250 Directory succesfully changed.\r\n");
 }
 
 void resSYST(ftpClient client) {
-	sendResponse(client, "215  Windows_NT.\r\n");
+	sendResponse(client, "215 Windown_NT.\r\n");
 }
 
 void resPasv(ftpClient& client) {
+	srand(time(NULL));
+	int port = 1024 + rand() % (65536 - 1024 + 1);
 
-	sendResponse(client, "227 Entering Passive Mode (127,0,0,1,198,47).\r\n");
+	char response[1024];
+	memset(response, 0, 1024);
+	sprintf(response, "227 Entering Passive Mode (127,0,0,1,%d,%d).\r\n", port / 256, port % 256);
+	sendResponse(client, response);
 
 	datasocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	/**
-	Reuse host
-	*/
-
 	SOCKADDR_IN saddr;
 	saddr.sin_family = AF_INET;
-	saddr.sin_port = htons(50735);
+	saddr.sin_port = htons(port);
 	saddr.sin_addr.s_addr = inet_addr(server_addr);
 	bind(datasocket, (sockaddr*)&saddr, sizeof(saddr));
-	int res = 0;
 	listen(datasocket, 10);
 	SOCKADDR_IN caddr;
 	int clen = sizeof(caddr);
@@ -81,11 +121,24 @@ void resPasv(ftpClient& client) {
 void resList(ftpClient client) {
 
 	sendResponse(client, "150 Here comes the directory listing.\r\n");
+	char dir[4096], tmp[1024], command[1024];
+	
+	memset(command, 0, 1024);
+	sprintf(command, "ls -l D:%s > C:/Temp/tmp.txt",client.curdic);
+	system(command);
 
-	char dir[1024] = "drw-r--r--    1 501      501        688017 Jan 24 13:04 Chuong0\r\n";
+	memset(dir, 0, 4096);
+	FILE* fr = fopen("C:/Temp/tmp.txt", "rt");
+	fgets(tmp, 1024, fr);
+
+	while (!feof(fr)) {
+		memset(tmp, 0, 1024);
+		fgets(tmp, 1023, fr);
+		strcpy(tmp + strlen(tmp), " ");
+		strcpy(dir + strlen(dir), tmp);
+	}
 	
 	sendDir(client, dir);
-//	closesocket(datasocket);
 	closesocket(client.data_sk);
 
 	sendResponse(client, "226 Directory send OK.\r\n");
@@ -110,18 +163,55 @@ void resFeat(ftpClient clen) {
 	send(clen.ctrl_sk, end, sizeof(end), 0);
 }
 
+void resSize(ftpClient client) {
 
-void Handle_client(ftpClient& clen) {
-	if (strcmp(clen.verb, "USER") == 0) resUser(clen);
-	else if (strcmp(clen.verb, "PASS") == 0) resPass(clen);
-	else if (strcmp(clen.verb, "OPTS") == 0) resOPTS(clen);
-	else if (strcmp(clen.verb, "PWD") == 0) resPwd(clen);
-	else if (strcmp(clen.verb, "CWD") == 0) resCwd(clen);
-	else if (strcmp(clen.verb, "SYST") == 0) resSYST(clen);
-	else if (strcmp(clen.verb, "PASV") == 0) resPasv(clen);
-	else if (strcmp(clen.verb, "LIST") == 0) resList(clen);
-	else if (strcmp(clen.verb, "TYPE") == 0) resType(clen);
-	else if (strcmp(clen.verb, "FEAT") == 0) resType(clen);
+	sendResponse(client, "550 Could not get file size.\r\n");
+}
+
+void resRETR(ftpClient client) {
+	char path[1024], status[1024], sendok[1024];
+	memset(path, 0, 1024); memset(status, 0, 1024); memset(sendok, 0, 1024);
+	sprintf(path, "D:%s/%s", client.curdic, client.arg);
+
+	FILE* f = fopen(path, "rb");
+	if (f != NULL) {
+		fseek(f, 0, SEEK_END);
+		long filesize = ftell(f);
+		char* data = (char*)calloc(filesize, 1);
+		fseek(f, 0, SEEK_SET);
+		fread(data, 1, filesize, f);
+		fclose(f);
+		
+		sprintf(status, "150 Opening BINARY mode data connection for %s (%ld bytes).\r\n", client.arg, filesize);
+		
+		sendResponse(client, status);
+		send(client.data_sk, data, filesize, 0);
+		closesocket(client.data_sk);
+		sendResponse(client, "226 Transfer complete.\r\n");
+	}
+	else {
+		// file khong ton tai
+	}
+}
+void Handle_client(ftpClient& client) {
+	if (strcmp(client.verb, "USER") == 0) resUser(client);
+	else 
+	if (strcmp(client.verb, "PASS") == 0) resPass(client);
+	else 
+	if(client.login > 0) {
+		// dang nhap voi tu cach anonymous
+		if (strcmp(client.verb, "OPTS") == 0) resOPTS(client);
+		else if (strcmp(client.verb, "PWD") == 0) resPwd(client);
+		else if (strcmp(client.verb, "CWD") == 0) resCwd(client);
+		else if (strcmp(client.verb, "SYST") == 0) resSYST(client);
+		else if (strcmp(client.verb, "PASV") == 0) resPasv(client);
+		else if (strcmp(client.verb, "LIST") == 0) resList(client);
+		else if (strcmp(client.verb, "TYPE") == 0) resType(client);
+		else if (strcmp(client.verb, "FEAT") == 0) resType(client);
+		else if (strcmp(client.verb, "SIZE") == 0) resSize(client);
+		else if (strcmp(client.verb, "RETR") == 0) resRETR(client);
+	}
+	else sendResponse(client, "500 Unknown command.\r\n");
 }
 
 int main()
@@ -155,17 +245,38 @@ DWORD WINAPI ClientThread(LPVOID arg) {
 	char buffer[1024], verb[1024];
 
 	while (0 == 0) {
+
+		if (client.login == 0) break;
+
 		memset(buffer, 0, 1024);
 		memset(client.verb, 0, 1024);
-
+		memset(client.arg, 0, 1024);
 		recv(client.ctrl_sk, buffer, 1023, 0);
-		sscanf(buffer, "%s", client.verb);
+		char* firstspace = strstr(buffer, " ");
+		
+		if (firstspace != NULL) {
+			strncpy(client.verb, buffer, firstspace - buffer);
+			strcpy(client.arg, firstspace + 1);
+			client.arg[strlen(client.arg) - 1] = 0;
+			client.arg[strlen(client.arg) - 1] = 0;
+			cout << client.verb << " " << client.arg << endl;
+		}
+		else {
+			strcpy(client.verb, buffer);
+			client.verb[strlen(client.verb) - 1] = 0;
+			client.verb[strlen(client.verb) - 1] = 0;
+			cout << client.verb << endl;
+		}
 
-		if (strcmp(verb, "QUIT") == 0) {
+		if (strcmp(verb, "QUIT") == 0 && strcmp(verb, "") == 0){
 
+			// to do something
+			break;
 		}
 		else {
 			Handle_client(client);
 		}
 	}
+
+	return 0;
 }
