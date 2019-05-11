@@ -144,6 +144,31 @@ void resList(ftpClient client) {
 	sendResponse(client, "226 Directory send OK.\r\n");
 }
 
+void resSTOR(ftpClient client) {
+	FILE* fw;
+	size_t nread;
+	char buf[1024], path[1024];
+	memset(path, 0, 1024);
+	sprintf(path, "D:%s/%s", client.curdic, client.arg);
+	fw = fopen(path, "wb");
+	sendResponse(client, "150 Opening BINARY mode data connection.\r\n");
+	memset(buf, 0, 1024);
+	long filesize = 0;
+	while (1) {
+		recv(client.data_sk, buf, 1023, 0);
+		if (strlen(buf) == 0) break;
+		fwrite(buf, sizeof(char), strlen(buf), fw);
+		filesize += strlen(buf);
+		
+		memset(buf, 0, 1024);
+	}
+	cout << "kich thuoc file la" << filesize << endl;
+//	recv(client.data_sk, buf, 688017, 1);
+//	fwrite(buf, sizeof(char), strlen(buf), fw);
+	closesocket(client.data_sk);
+	fclose(fw);
+	sendResponse(client, "226 Transfer file successfully.\r\n");
+}
 void resType(ftpClient client) {
 	sendResponse(client, "200 Switching to Binary mode.\r\n");
 }
@@ -192,6 +217,7 @@ void resRETR(ftpClient client) {
 	else {
 		// file khong ton tai
 	}
+
 }
 void Handle_client(ftpClient& client) {
 	if (strcmp(client.verb, "USER") == 0) resUser(client);
@@ -210,6 +236,7 @@ void Handle_client(ftpClient& client) {
 		else if (strcmp(client.verb, "FEAT") == 0) resType(client);
 		else if (strcmp(client.verb, "SIZE") == 0) resSize(client);
 		else if (strcmp(client.verb, "RETR") == 0) resRETR(client);
+		else if (strcmp(client.verb, "STOR") == 0) resSTOR(client);
 	}
 	else sendResponse(client, "500 Unknown command.\r\n");
 }
