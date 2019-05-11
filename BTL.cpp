@@ -154,12 +154,8 @@ void resSTOR(ftpClient client) {
 	sendResponse(client, "150 Opening BINARY mode data connection.\r\n");
 	memset(buf, 0, 1024);
 	long filesize = 0;
-	while (1) {
-		recv(client.data_sk, buf, 1023, 0);
-		if (strlen(buf) == 0) break;
-		fwrite(buf, sizeof(char), strlen(buf), fw);
-		filesize += strlen(buf);
-		
+	while (recv(client.data_sk, buf, 1023, 0)) {
+		fwrite(buf, 1023, 1, fw);
 		memset(buf, 0, 1024);
 	}
 	cout << "kich thuoc file la" << filesize << endl;
