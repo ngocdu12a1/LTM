@@ -24,15 +24,19 @@ struct ftpClient {
 	}
 };
 
-SOCKET datasocket, sendata;
+void insert(char* source, int index, char a) {
+	char* tmp = new char[strlen(source) + 1];
+	strcpy(tmp, source + index);
+	source[index] = '"';
+	strcpy(source + index + 1, tmp);
+	free(tmp);
+}
 
 void sendResponse(ftpClient client, char* res) {
 	send(client.ctrl_sk, res, strlen(res), 0);
 }
 
-void sendDir(ftpClient client, char* dir) {
-	send(client.data_sk, dir, strlen(dir), 0);
-}
+
 void resUser(ftpClient& client) {
 	memset(client.name, 0, 1024);
 	strcpy(client.name, client.arg);
@@ -86,7 +90,6 @@ void resPwd(ftpClient client) {
 }
 
 void resCwd(ftpClient& client) {
-	
 	memset(client.curdic, 0, sizeof(client.curdic));
 	strcpy(client.curdic, client.arg);
 	sendResponse(client, "250 Directory succesfully changed.\r\n");
@@ -105,7 +108,7 @@ void resPasv(ftpClient& client) {
 	sprintf(response, "227 Entering Passive Mode (127,0,0,1,%d,%d).\r\n", port / 256, port % 256);
 	sendResponse(client, response);
 
-	datasocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	SOCKET datasocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	SOCKADDR_IN saddr;
 	saddr.sin_family = AF_INET;
 	saddr.sin_port = htons(port);
@@ -121,32 +124,45 @@ void resPasv(ftpClient& client) {
 void resList(ftpClient client) {
 
 	sendResponse(client, "150 Here comes the directory listing.\r\n");
-	char dir[4096], tmp[1024], command[1024];
-	
+	char command[1024], path[1024];
+	memset(path, 0, 1024);
+	strcpy(path, client.curdic);
+	// them dau " vao
+	int i = 0;
+	while (i < strlen(path)) {
+		if (path[i] == '/') {
+			insert(path, i, '"');
+			insert(path, i + 2, '"');
+			i = i + 3;
+		}
+		else i++;
+	}
+	if (path[strlen(path) - 2] == '/') {
+		path[strlen(path) - 1] = 0;
+	}
+	else if (path[strlen(path) - 1] != '"') {
+		strcpy(path + strlen(path), "\"");
+	}
+
 	memset(command, 0, 1024);
-	sprintf(command, "ls -l D:%s > C:/Temp/tmp.txt",client.curdic);
+	sprintf(command, "ls -l \"D:%s > C:/Temp/tmp.txt",path);
 	system(command);
 
-	memset(dir, 0, 4096);
-	FILE* fr = fopen("C:/Temp/tmp.txt", "rt");
-	fgets(tmp, 1024, fr);
-
-	while (!feof(fr)) {
-		memset(tmp, 0, 1024);
-		fgets(tmp, 1023, fr);
-		strcpy(tmp + strlen(tmp), " ");
-		strcpy(dir + strlen(dir), tmp);
-	}
+	FILE* f = fopen("C:/Temp/tmp.txt", "rt");
+	fseek(f, 0, SEEK_END);
+	long filesize = ftell(f);
+	char* data = (char*)calloc(filesize, 1);
+	fseek(f, 0, SEEK_SET);
+	fread(data, 1, filesize, f);
+	fclose(f);
 	
-	sendDir(client, dir);
+	send(client.data_sk, data, filesize, 0);
 	closesocket(client.data_sk);
-
 	sendResponse(client, "226 Directory send OK.\r\n");
 }
 
 void resSTOR(ftpClient client) {
 	FILE* fw;
-	size_t nread;
 	char buf[1024], path[1024];
 	memset(path, 0, 1024);
 	sprintf(path, "D:%s/%s", client.curdic, client.arg);
@@ -158,9 +174,6 @@ void resSTOR(ftpClient client) {
 		fwrite(buf, 1023, 1, fw);
 		memset(buf, 0, 1024);
 	}
-	cout << "kich thuoc file la" << filesize << endl;
-//	recv(client.data_sk, buf, 688017, 1);
-//	fwrite(buf, sizeof(char), strlen(buf), fw);
 	closesocket(client.data_sk);
 	fclose(fw);
 	sendResponse(client, "226 Transfer file successfully.\r\n");
@@ -185,8 +198,23 @@ void resFeat(ftpClient clen) {
 }
 
 void resSize(ftpClient client) {
+	char path[1024], size[1024];
+	memset(path, 0, 1024);
+	sprintf(path, "D:%s/%s", client.curdic, client.arg);
+	FILE* f = fopen(path, "rb");
+	if (f != NULL) {
+		fseek(f, 0, SEEK_END);
+		long filesize = ftell(f);
+		char* data = (char*)calloc(filesize, 1);
+		fseek(f, 0, SEEK_SET);
+		fread(data, 1, filesize, f);
+		fclose(f);
 
-	sendResponse(client, "550 Could not get file size.\r\n");
+		memset(size, 0, 1024);
+		sprintf(size, "213 %d\r\n", filesize);
+		sendResponse(client, size);
+	}
+	else sendResponse(client, "550 Could not get file size.\r\n");
 }
 
 void resRETR(ftpClient client) {
@@ -211,9 +239,8 @@ void resRETR(ftpClient client) {
 		sendResponse(client, "226 Transfer complete.\r\n");
 	}
 	else {
-		// file khong ton tai
+		sendResponse(client, "550 Failed to open file.\r\n");
 	}
-
 }
 void Handle_client(ftpClient& client) {
 	if (strcmp(client.verb, "USER") == 0) resUser(client);
@@ -275,8 +302,9 @@ DWORD WINAPI ClientThread(LPVOID arg) {
 		memset(client.verb, 0, 1024);
 		memset(client.arg, 0, 1024);
 		recv(client.ctrl_sk, buffer, 1023, 0);
+		if (strlen(buffer) == 0) break;
+
 		char* firstspace = strstr(buffer, " ");
-		
 		if (firstspace != NULL) {
 			strncpy(client.verb, buffer, firstspace - buffer);
 			strcpy(client.arg, firstspace + 1);
@@ -291,15 +319,14 @@ DWORD WINAPI ClientThread(LPVOID arg) {
 			cout << client.verb << endl;
 		}
 
-		if (strcmp(verb, "QUIT") == 0 && strcmp(verb, "") == 0){
-
-			// to do something
+		if (strcmp(verb, "QUIT") == 0){
+			sendResponse(client, "221 Goodbye.\r\n");
 			break;
 		}
 		else {
 			Handle_client(client);
 		}
 	}
-
+	cout << "Client disconnected" << endl;
 	return 0;
 }
