@@ -14,17 +14,17 @@ DWORD WINAPI ClientThread(LPVOID arg);
 struct ftpClient {
 	char verb[1024], curdic[1024], arg[1024], name[1024], pass[1024];
 	SOCKET data_sk, ctrl_sk;
-	int login, permission;
+	int login;
 
 	ftpClient(SOCKET c) {
 		ctrl_sk = c;
-		login = permission = -1;
+		login =  -1;
 		memset(curdic, 0, 1024);
 		strcpy(curdic, "/");
 	}
 };
 
-void insert(char* source, int index, char a) {
+void insert(char* source, int index) {
 	char* tmp = new char[strlen(source) + 1];
 	strcpy(tmp, source + index);
 	source[index] = '"';
@@ -37,20 +37,20 @@ void sendResponse(ftpClient client, char* res) {
 }
 
 
-void resUser(ftpClient& client) {
+void resUSER(ftpClient& client) {
 	memset(client.name, 0, 1024);
 	strcpy(client.name, client.arg);
 	sendResponse(client, "331 Please spcify the password.\r\n");
 }
 
-void resPass(ftpClient& client) {
-
+void resPASS(ftpClient& client) {
 	memset(client.pass, 0, 1024);
 	strcpy(client.pass, client.arg);
 
 	if (strcmp(client.name, "anonymous") == 0) {
 		// dang nhap an danh
 		client.login = 1;
+		sendResponse(client, "230 Login succesfull.\r\n");
 	}
 	else {
 		FILE* f = fopen("C:/Temp/login.txt", "rt");
@@ -64,9 +64,9 @@ void resPass(ftpClient& client) {
 				// dang nhap voi tu cach la user
 				client.login = 2;
 				isValid = true;
+				sendResponse(client, "230 Login succesfull.\r\n");
 				break;
 			}
-
 		}
 		if (!isValid) {
 			sendResponse(client, "530 name or password incorrect.\r\n");
@@ -74,7 +74,6 @@ void resPass(ftpClient& client) {
 			closesocket(client.ctrl_sk);
 		}
 	}
-	sendResponse(client, "230 Login succesfull.\r\n");
 
 }
 
@@ -82,16 +81,24 @@ void resOPTS(ftpClient client) {
 	sendResponse(client, "200 Always in UTF8 mode.\r\n");
 }
 
-void resPwd(ftpClient client) {
+void resPWD(ftpClient client) {
 	char dir[1024];
 	memset(dir, 0, 1024);
 	sprintf(dir, "%d \"%s\"\r\n", 257, client.curdic);
 	sendResponse(client, dir);
 }
 
-void resCwd(ftpClient& client) {
-	memset(client.curdic, 0, sizeof(client.curdic));
-	strcpy(client.curdic, client.arg);
+void resCWD(ftpClient& client) {
+	if (strstr(client.arg, "/") == NULL) {
+		char path[1024];
+		memset(path, 0, 1024);
+		sprintf(path, "%s/%s", client.curdic, client.arg);
+		strcpy(client.curdic, path);
+	}
+	else {
+		memset(client.curdic, 0, sizeof(client.curdic));
+		strcpy(client.curdic, client.arg);
+	}
 	sendResponse(client, "250 Directory succesfully changed.\r\n");
 }
 
@@ -99,7 +106,7 @@ void resSYST(ftpClient client) {
 	sendResponse(client, "215 Windown_NT.\r\n");
 }
 
-void resPasv(ftpClient& client) {
+void resPASV(ftpClient& client) {
 	srand(time(NULL));
 	int port = 1024 + rand() % (65536 - 1024 + 1);
 
@@ -121,7 +128,7 @@ void resPasv(ftpClient& client) {
 	cout << "connect data succesfully" << endl;
 }
 
-void resList(ftpClient client) {
+void resLIST(ftpClient client) {
 
 	sendResponse(client, "150 Here comes the directory listing.\r\n");
 	char command[1024], path[1024];
@@ -131,8 +138,8 @@ void resList(ftpClient client) {
 	int i = 0;
 	while (i < strlen(path)) {
 		if (path[i] == '/') {
-			insert(path, i, '"');
-			insert(path, i + 2, '"');
+			insert(path, i);
+			insert(path, i + 2);
 			i = i + 3;
 		}
 		else i++;
@@ -162,42 +169,48 @@ void resList(ftpClient client) {
 }
 
 void resSTOR(ftpClient client) {
-	FILE* fw;
-	char buf[1024], path[1024];
-	memset(path, 0, 1024);
-	sprintf(path, "D:%s/%s", client.curdic, client.arg);
-	fw = fopen(path, "wb");
-	sendResponse(client, "150 Opening BINARY mode data connection.\r\n");
-	memset(buf, 0, 1024);
-	long filesize = 0;
-	while (recv(client.data_sk, buf, 1023, 0)) {
-		fwrite(buf, 1023, 1, fw);
-		memset(buf, 0, 1024);
+	if (client.login == 1) {
+		sendResponse(client, "550 Permission denied.\r\n");
+		closesocket(client.data_sk);
 	}
-	closesocket(client.data_sk);
-	fclose(fw);
-	sendResponse(client, "226 Transfer file successfully.\r\n");
+	else {
+		FILE* fw;
+		char buf[1024], path[1024];
+		memset(path, 0, 1024);
+		sprintf(path, "D:%s/%s", client.curdic, client.arg);
+		fw = fopen(path, "wb");
+		sendResponse(client, "150 Opening BINARY mode data connection.\r\n");
+		memset(buf, 0, 1024);
+		long filesize = 0;
+		while (0 == 0) {
+			int n = recv(client.data_sk, buf, 1023, 0);
+			filesize += n;
+			if (n <= 0) break;
+			fwrite(buf, 1023, 1, fw);
+			memset(buf, 0, 1024);
+		}
+		cout << "kich thuoc file nhan duoc la " << filesize << endl;
+		closesocket(client.data_sk);
+		fclose(fw);
+		sendResponse(client, "226 Transfer file successfully.\r\n");
+	}
 }
-void resType(ftpClient client) {
+
+void resTYPE(ftpClient client) {
 	sendResponse(client, "200 Switching to Binary mode.\r\n");
 }
-void resFeat(ftpClient clen) {
-	char start[1024] = "211-Features:\r\n";
-	char f1[1024] = "EPRT\r\n"; char f2[1024] = "EPSV\r\n";
-	char f3[1024] = "MDTM\r\n"; char f4[1024] = "REST STREAM\r\n";
-	char f5[1024] = "SIZE\r\n"; char f6[1024] = "TVFS\r\n";
-	char f7[1024] = "UTF8\r\n"; 
-	char end[1024] = "211 End.\r\n";
 
-	send(clen.ctrl_sk, start, sizeof(start), 0);
-	send(clen.ctrl_sk, f1, sizeof(f1), 0);  send(clen.ctrl_sk, f2, sizeof(f2), 0);
-	send(clen.ctrl_sk, f3, sizeof(f3), 0);  send(clen.ctrl_sk, f4, sizeof(f4), 0);
-	send(clen.ctrl_sk, f5, sizeof(f5), 0);  send(clen.ctrl_sk, f6, sizeof(f6), 0);
-	send(clen.ctrl_sk, f7, sizeof(f7), 0); 
-	send(clen.ctrl_sk, end, sizeof(end), 0);
+void resFEAT(ftpClient client) {
+	sendResponse(client, "211-Features:\r\n");
+	sendResponse(client, "OPTS\r\n");
+	sendResponse(client, "SIZE\r\n");
+	sendResponse(client, "STOR\r\n");
+	sendResponse(client, "RETR\r\n");
+	sendResponse(client, "TYPE\r\n");
+	sendResponse(client, "211 End.\r\n");
 }
 
-void resSize(ftpClient client) {
+void resSIZE(ftpClient client) {
 	char path[1024], size[1024];
 	memset(path, 0, 1024);
 	sprintf(path, "D:%s/%s", client.curdic, client.arg);
@@ -232,7 +245,6 @@ void resRETR(ftpClient client) {
 		fclose(f);
 		
 		sprintf(status, "150 Opening BINARY mode data connection for %s (%ld bytes).\r\n", client.arg, filesize);
-		
 		sendResponse(client, status);
 		send(client.data_sk, data, filesize, 0);
 		closesocket(client.data_sk);
@@ -242,22 +254,23 @@ void resRETR(ftpClient client) {
 		sendResponse(client, "550 Failed to open file.\r\n");
 	}
 }
+
 void Handle_client(ftpClient& client) {
-	if (strcmp(client.verb, "USER") == 0) resUser(client);
+	if (strcmp(client.verb, "USER") == 0) resUSER(client);
 	else 
-	if (strcmp(client.verb, "PASS") == 0) resPass(client);
+	if (strcmp(client.verb, "PASS") == 0) resPASS(client);
 	else 
 	if(client.login > 0) {
 		// dang nhap voi tu cach anonymous
 		if (strcmp(client.verb, "OPTS") == 0) resOPTS(client);
-		else if (strcmp(client.verb, "PWD") == 0) resPwd(client);
-		else if (strcmp(client.verb, "CWD") == 0) resCwd(client);
+		else if (strcmp(client.verb, "PWD") == 0) resPWD(client);
+		else if (strcmp(client.verb, "CWD") == 0) resCWD(client);
 		else if (strcmp(client.verb, "SYST") == 0) resSYST(client);
-		else if (strcmp(client.verb, "PASV") == 0) resPasv(client);
-		else if (strcmp(client.verb, "LIST") == 0) resList(client);
-		else if (strcmp(client.verb, "TYPE") == 0) resType(client);
-		else if (strcmp(client.verb, "FEAT") == 0) resType(client);
-		else if (strcmp(client.verb, "SIZE") == 0) resSize(client);
+		else if (strcmp(client.verb, "PASV") == 0) resPASV(client);
+		else if (strcmp(client.verb, "LIST") == 0) resLIST(client);
+		else if (strcmp(client.verb, "TYPE") == 0) resTYPE(client);
+		else if (strcmp(client.verb, "FEAT") == 0) resTYPE(client);
+		else if (strcmp(client.verb, "SIZE") == 0) resSIZE(client);
 		else if (strcmp(client.verb, "RETR") == 0) resRETR(client);
 		else if (strcmp(client.verb, "STOR") == 0) resSTOR(client);
 	}
