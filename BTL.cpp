@@ -261,7 +261,6 @@ void Handle_client(ftpClient& client) {
 	if (strcmp(client.verb, "PASS") == 0) resPASS(client);
 	else 
 	if(client.login > 0) {
-		// dang nhap voi tu cach anonymous
 		if (strcmp(client.verb, "OPTS") == 0) resOPTS(client);
 		else if (strcmp(client.verb, "PWD") == 0) resPWD(client);
 		else if (strcmp(client.verb, "CWD") == 0) resCWD(client);
@@ -340,6 +339,6 @@ DWORD WINAPI ClientThread(LPVOID arg) {
 			Handle_client(client);
 		}
 	}
-	cout << "Client disconnected" << endl;
+	cout << "Client disconnect" << endl;
 	return 0;
 }
